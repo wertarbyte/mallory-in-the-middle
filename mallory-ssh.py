@@ -35,7 +35,7 @@ class Keyring:
 	def load_keyfile(self, filename):
 		key = paramiko.RSAKey(filename=filename)
 		fp = key.get_fingerprint()
-		print('Read key ' + u(hexlify(fp)) + ' from "' + filename +'"')
+		print('Read key ' + fmt_fp(u(hexlify(fp))) + ' from "' + filename +'"')
 		self.keys[fp] = key
 
 	def get_key(self, fp):
@@ -43,6 +43,11 @@ class Keyring:
 			return self.keys[fp]
 		else:
 			return None
+
+def fmt_fp(fp):
+	n = 2
+	tokens = [ fp[i:i+n] for i in xrange(0, len(fp), n) ]
+	return ':'.join(tokens)
 
 def get_server_fp(dst, dport):
 	client = paramiko.SSHClient()
@@ -58,7 +63,7 @@ def get_server_fp(dst, dport):
 	try:
 		t.start_client()
 		key = t.get_remote_server_key()
-		print('target fp: ' + u(hexlify(key.get_fingerprint())))
+		print('target fp: ' + fmt_fp(u(hexlify(key.get_fingerprint()))))
 		return key.get_fingerprint()
 	except paramiko.SSHException:
 		print('*** SSH negotiation failed.')
@@ -118,7 +123,6 @@ def handle_client(client):
 
 keyring = Keyring()
 for filename in sys.argv[1:]:
-	print('trying to load key file: ' + filename)
 	keyring.load_keyfile(filename)
 
 # bind the listening socket for iptables REDIRECT
