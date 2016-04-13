@@ -17,16 +17,18 @@ from paramiko.py3compat import b, u, decodebytes
 #paramiko.util.log_to_file('mallory_server.log')
 
 class RejectingServer(paramiko.ServerInterface):
+	identity = None
 
-    def __init__(self):
-        self.event = threading.Event()
+	def __init__(self, identity):
+		self.identity = identity
+		self.event = threading.Event()
 
-    def check_auth_password(self, username, password):
-        print("""Auth attempt with user '%s' and password '%s'""" % (username, password))
-        return paramiko.AUTH_FAILED
+	def check_auth_password(self, username, password):
+		print("""Auth attempt to '%s' with user '%s' and password '%s'""" % (self.identity, username, password))
+		return paramiko.AUTH_FAILED
 
-    def get_allowed_auths(self, username):
-        return 'password'
+	def get_allowed_auths(self, username):
+		return 'password'
 
 
 class Keyring:
@@ -100,7 +102,7 @@ def handle_client(client):
 			print('(Failed to load moduli -- gex will be unsupported.)')
 			raise
 		t.add_server_key(key)
-		server = RejectingServer()
+		server = RejectingServer("%s:%s" % (dst, dport))
 		try:
 			t.start_server(server=server)
 		except paramiko.SSHException:
