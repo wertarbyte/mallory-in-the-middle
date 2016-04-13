@@ -89,14 +89,49 @@ def get_orig_dst(conn):
 	sockaddr_in = conn.getsockopt(socket.SOL_IP, SO_ORIGINAL_DST, 16)
 	(proto, port, a, b, c, d) = struct.unpack('!HHBBBB', sockaddr_in[:8])
 	dst = "%d.%d.%d.%d" % (a, b, c, d)
-	print('Original destination was: %d.%d.%d.%d:%d' % (a, b, c, d, port))
+	print('Original destination was: %s:%d' % (dst, port))
 	return (dst, port)
+
+def _read_bytes(file, n):
+	data = b""
+	while len(data) < n:
+		d = file.read(1)
+		if not d:
+			raise IOError("Connection closed")
+		data += d
+	return data
+
+def get_socks4_dst(conn):
+	writer = conn.makefile("wb")
+	reader = conn.makefile("rb", 0)
+	try:
+		req = _read_bytes(reader, 8)
+		login = ""
+		while True:
+			d = _read_bytes(reader, 1)
+			if d == b"\x00":
+				break
+			login += d
+
+		(ver, cmd, port, addr_a, addr_b, addr_c, addr_d) = struct.unpack("!2BH4B", req)
+		if not (ver == 0x04 and cmd == 0x01):
+			raise IOError("Invalid SOCKS4 request")
+		dst = "%d.%d.%d.%d" % (addr_a, addr_b, addr_c, addr_d)
+		print('Original destination was: %s:%d (login: %s)' % (dst, port, login))
+		reply = struct.pack("!2BH4B", 0, 0x5A, 0, 0, 0, 0, 0)
+		writer.write(reply)
+		return (dst, port)
+	finally:
+		writer.close()
+		reader.close()
 
 targets = SshTarget()
 
 def handle_client(client):
 	print('Incoming client connection connection!')
-	(dst, dport) = get_orig_dst(client)
+	#(dst, dport) = get_orig_dst(client)
+	(dst, dport) = get_socks4_dst(client)
+
 	fp = targets.get_fp(dst, dport)
 
 	key = keyring.get_key(fp)
@@ -161,3 +196,5 @@ while (1):
 		print('*** Listen/accept failed: ' + str(e))
 		traceback.print_exc()
 		sys.exit(1)
+	finally:
+		client.close()
