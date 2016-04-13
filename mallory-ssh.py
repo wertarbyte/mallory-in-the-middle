@@ -93,38 +93,23 @@ def get_orig_dst(conn):
 	print('Original destination was: %s:%d' % (dst, port))
 	return (dst, port)
 
-def _read_bytes(file, n):
-	data = b""
-	while len(data) < n:
-		d = file.read(1)
-		if not d:
-			raise IOError("Connection closed")
-		data += d
-	return data
-
 def get_socks4_dst(conn):
-	writer = conn.makefile("wb")
-	reader = conn.makefile("rb", 0)
-	try:
-		req = _read_bytes(reader, 8)
-		login = ""
-		while True:
-			d = _read_bytes(reader, 1)
-			if d == b"\x00":
-				break
-			login += d
+	req = conn.recv(8)
+	login = ""
+	while True:
+		d = conn.recv(1)
+		if d == b"\x00":
+			break
+		login += d
 
-		(ver, cmd, port, addr_a, addr_b, addr_c, addr_d) = struct.unpack("!2BH4B", req)
-		if not (ver == 0x04 and cmd == 0x01):
-			raise IOError("Invalid SOCKS4 request")
-		dst = "%d.%d.%d.%d" % (addr_a, addr_b, addr_c, addr_d)
-		print('Original destination was: %s:%d (login: %s)' % (dst, port, login))
-		reply = struct.pack("!2BH4B", 0, 0x5A, 0, 0, 0, 0, 0)
-		writer.write(reply)
-		return (dst, port)
-	finally:
-		writer.close()
-		reader.close()
+	(ver, cmd, port, addr_a, addr_b, addr_c, addr_d) = struct.unpack("!2BH4B", req)
+	if not (ver == 0x04 and cmd == 0x01):
+		raise IOError("Invalid SOCKS4 request")
+	dst = "%d.%d.%d.%d" % (addr_a, addr_b, addr_c, addr_d)
+	print('Original destination was: %s:%d (login: %s)' % (dst, port, login))
+	reply = struct.pack("!2BH4B", 0, 0x5A, 0, 0, 0, 0, 0)
+	conn.send(reply)
+	return (dst, port)
 
 targets = SshTarget()
 
