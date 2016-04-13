@@ -169,7 +169,7 @@ keyring = Keyring()
 for filename in args.keys:
 	keyring.load_keyfile(filename)
 
-print('%u distinct host keys have been loaded into te key ring' % len(keyring.keys))
+print('%u distinct host keys have been loaded into the key ring' % len(keyring.keys))
 
 # bind the listening socket for incoming clients
 try:
