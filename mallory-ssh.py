@@ -8,6 +8,7 @@ import sys
 import threading
 import traceback
 import struct
+import argparse
 
 import paramiko
 from paramiko.py3compat import b, u, decodebytes
@@ -127,10 +128,12 @@ def get_socks4_dst(conn):
 
 targets = SshTarget()
 
-def handle_client(client):
+def handle_client(client, socks):
 	print('Incoming client connection connection!')
-	#(dst, dport) = get_orig_dst(client)
-	(dst, dport) = get_socks4_dst(client)
+	if socks:
+		(dst, dport) = get_socks4_dst(client)
+	else:
+		(dst, dport) = get_orig_dst(client)
 
 	fp = targets.get_fp(dst, dport)
 
@@ -170,17 +173,24 @@ def handle_client(client):
 		t.close()
 		client.close()
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--port", type=int, dest="port", help="listening port")
+parser.add_argument("--socks", action="store_true", help="offer SOCKS4 (default: no)")
+parser.add_argument('keys', metavar='KEYFILE', type=str, nargs='*',
+                            help='SSH host key files')
+args = parser.parse_args()
+
 keyring = Keyring()
-for filename in sys.argv[1:]:
+for filename in args.keys:
 	keyring.load_keyfile(filename)
 
 print('%u distinct host keys have been loaded into te key ring' % len(keyring.keys))
 
-# bind the listening socket for iptables REDIRECT
+# bind the listening socket for incoming clients
 try:
 	ipt_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	ipt_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	ipt_sock.bind(('', 2200))
+	ipt_sock.bind(('', args.port))
 except Exception as e:
 	print('*** Bind failed: ' + str(e))
 	traceback.print_exc()
@@ -191,7 +201,7 @@ while (1):
 		ipt_sock.listen(0)
 		print('Listening for connection ...')
 		client, addr = ipt_sock.accept()
-		handle_client(client)
+		handle_client(client, socks=args.socks)
 	except Exception as e:
 		print('*** Listen/accept failed: ' + str(e))
 		traceback.print_exc()
