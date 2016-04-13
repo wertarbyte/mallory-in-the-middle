@@ -51,28 +51,38 @@ def fmt_fp(fp):
 	tokens = [ fp[i:i+n] for i in xrange(0, len(fp), n) ]
 	return ':'.join(tokens)
 
-def get_server_fp(dst, dport):
-	client = paramiko.SSHClient()
-	# now connect
-	try:
-		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		sock.connect((dst, dport))
-	except Exception as e:
-		print('*** Connect failed: ' + str(e))
-		traceback.print_exc()
-		raise
-	t = paramiko.Transport(sock)
-	try:
-		t.start_client()
-		key = t.get_remote_server_key()
-		print('target fp: ' + fmt_fp(u(hexlify(key.get_fingerprint()))))
-		return key.get_fingerprint()
-	except paramiko.SSHException:
-		print('*** SSH negotiation failed.')
-		return None
-	finally:
-		t.close()
-		sock.close()
+class SshTarget:
+	hosts = {}
+
+	def get_fp(self, dst, dport):
+		if (dst, dport) not in self.hosts:
+			fp = self.__get_server_fp(dst, dport)
+			self.hosts[(dst, dport)] = fp
+
+		return self.hosts[(dst, dport)]
+
+	def __get_server_fp(self, dst, dport):
+		client = paramiko.SSHClient()
+		# now connect
+		try:
+			sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			sock.connect((dst, dport))
+		except Exception as e:
+			print('*** Connect failed: ' + str(e))
+			traceback.print_exc()
+			return None
+		t = paramiko.Transport(sock)
+		try:
+			t.start_client()
+			key = t.get_remote_server_key()
+			print('retrieved target fp: ' + fmt_fp(u(hexlify(key.get_fingerprint()))))
+			return key.get_fingerprint()
+		except paramiko.SSHException:
+			print('*** SSH negotiation failed.')
+			return None
+		finally:
+			t.close()
+			sock.close()
 
 def get_orig_dst(conn):
 	SO_ORIGINAL_DST = 80
@@ -82,10 +92,12 @@ def get_orig_dst(conn):
 	print('Original destination was: %d.%d.%d.%d:%d' % (a, b, c, d, port))
 	return (dst, port)
 
+targets = SshTarget()
+
 def handle_client(client):
 	print('Incoming client connection connection!')
 	(dst, dport) = get_orig_dst(client)
-	fp = get_server_fp(dst, dport)
+	fp = targets.get_fp(dst, dport)
 
 	key = keyring.get_key(fp)
 	if key is None:
@@ -126,6 +138,8 @@ def handle_client(client):
 keyring = Keyring()
 for filename in sys.argv[1:]:
 	keyring.load_keyfile(filename)
+
+print('%u distinct host keys have been loaded into te key ring' % len(keyring.keys))
 
 # bind the listening socket for iptables REDIRECT
 try:
