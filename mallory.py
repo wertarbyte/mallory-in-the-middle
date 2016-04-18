@@ -65,7 +65,6 @@ class MalloryServer:
 		self.socket.bind(('', self.port))
 
 	def _loop(self):
-		print('Listening for connection ...')
 		self.socket.listen(0)
 		client, addr = self.socket.accept()
 		client_thread = threading.Thread(target=self._handle_client, args=(client, addr))
@@ -88,6 +87,7 @@ class MalloryServer:
 
 	def start(self):
 		self._bind_socket()
+		print('Listening for connections...')
 		while True:
 			self._loop()
 
