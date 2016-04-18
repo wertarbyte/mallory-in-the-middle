@@ -87,7 +87,7 @@ class MalloryServer:
 
 	def start(self):
 		self._bind_socket()
-		print('Listening for connections...')
+		print('Listening for connections' + (' (SOCKS)' if self.use_socks else '') + '...')
 		while True:
 			self._loop()
 
