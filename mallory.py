@@ -136,19 +136,26 @@ class SSHRejectingServer(paramiko.ServerInterface):
 
 
 class SSHHostKeyring:
-	keys = {}
+	def __init__(self, fake_keys=False):
+		self.keys = {}
+		self.fake_keys = fake_keys
 
 	def load_keyfile(self, filename):
 		key = paramiko.RSAKey(filename=filename)
 		fp = key.get_fingerprint()
 		print('Read key ' + fmt_fp(u(hexlify(fp))) + ' from "' + filename +'"')
-		self.keys[fp] = key
+		self.keys[fp] = (key, True)
 
 	def get_key(self, fp):
 		if fp in self.keys:
 			return self.keys[fp]
+		elif self.fake_keys:
+			print('Generating new fake key for fingerprint ' + fmt_fp(u(hexlify(fp))))
+			key = paramiko.rsakey.RSAKey.generate(1024)
+			self.keys[fp] = (key, False)
+			return self.keys[fp]
 		else:
-			return None
+			return (None, True)
 
 class SSHTargetDatabase:
 	hosts = {}
@@ -184,22 +191,25 @@ class SSHTargetDatabase:
 			sock.close()
 
 class SSHInterceptor(MalloryInterceptor):
-	def __init__(self, keyring, targets):
+	def __init__(self, keyring, targets, fake_keys=False):
 		self.keyring = keyring
 		self.targets = targets
+		self.fake_keys = fake_keys
 
 	def want(self, dst):
 		if (dst[1] != 22):
 			return False
 		# get host key of target
 		fp = self.targets.get_fp(dst)
-		if self.keyring.get_key(fp):
+		key, genuine = self.keyring.get_key(fp)
+		print('Got key: %r (%r)' % (key, genuine))
+		if key and (genuine or self.fake_keys):
 			return True
 		return False
 
 	def intercept(self, client, dst):
 		fp = self.targets.get_fp(dst)
-		key = self.keyring.get_key(fp)
+		key, genuine = self.keyring.get_key(fp)
 		if key:
 			t = paramiko.Transport(client)
 			t.set_gss_host(socket.getfqdn(""))
@@ -231,19 +241,20 @@ def launch_server():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--port", type=int, dest="port", help="listening port")
 	parser.add_argument("--socks", action="store_true", help="offer SOCKS4 (default: no)")
+	parser.add_argument("--autokeygen", action="store_true", help="generate random keys (default: no)")
 	parser.add_argument('keys', metavar='KEYFILE', type=str, nargs='*',
                             help='SSH host key files')
 	args = parser.parse_args()
 
 	targetdb = SSHTargetDatabase()
-	keyring = SSHHostKeyring()
+	keyring = SSHHostKeyring(args.autokeygen)
 	for filename in args.keys:
 		keyring.load_keyfile(filename)
 
 	print('%u distinct host keys have been loaded into the key ring' % len(keyring.keys))
 
 	mallory = MalloryServer(args.port, args.socks)
-	mallory.add_interceptor(SSHInterceptor(keyring, targetdb))
+	mallory.add_interceptor(SSHInterceptor(keyring, targetdb, args.autokeygen))
 	mallory.add_interceptor(TCPRelay())
 	mallory.start()
 
