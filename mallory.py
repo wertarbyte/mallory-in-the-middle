@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+#
+# Mallory - TCP and SSH interceptor
+#
+# By Stefan Tomanek <stefan.tomanek@wertarbyte.de>
 
 import base64
 from binascii import hexlify
@@ -10,6 +14,7 @@ import argparse
 import struct
 import select
 import threading
+import signal
 
 import paramiko
 from paramiko.py3compat import b, u, decodebytes
@@ -64,6 +69,7 @@ class MalloryServer:
 		self.socket.listen(0)
 		client, addr = self.socket.accept()
 		client_thread = threading.Thread(target=self._handle_client, args=(client, addr))
+		client_thread.setDaemon(True)
 		client_thread.start()
 
 	def _handle_client(self, client, src):
@@ -241,6 +247,11 @@ def launch_server():
 	mallory.add_interceptor(TCPRelay())
 	mallory.start()
 
+def quit(signal, frame):
+	print('Terminating...')
+	sys.exit(0)
+
 if __name__ == "__main__":
 	#paramiko.util.log_to_file('mallory_server.log')
+	signal.signal(signal.SIGINT, quit)
 	launch_server()
