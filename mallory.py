@@ -60,21 +60,22 @@ class MalloryServer:
 		self.socket.bind(('', self.port))
 
 	def _loop(self):
-		try:
-			self.socket.listen(0)
-			print('Listening for connection ...')
-			client, addr = self.socket.accept()
-			self._handle_client(client, addr)
-		finally:
-			client.close()
+		print('Listening for connection ...')
+		self.socket.listen(0)
+		client, addr = self.socket.accept()
+		client_thread = threading.Thread(target=self._handle_client, args=(client, addr))
+		client_thread.start()
 
 	def _handle_client(self, client, src):
-		dst = self._get_dst(client)
-		for ior in self.interceptors:
-			if ior.want(dst):
-				print('[%s] Intercepting connection: %s:%d -> %s:%d' % (ior.__class__.__name__, src[0], src[1], dst[0], dst[1]))
-				ior.intercept(client, dst)
-				break
+		try:
+			dst = self._get_dst(client)
+			for ior in self.interceptors:
+				if ior.want(dst):
+					print('[%s] Intercepting connection: %s:%d -> %s:%d' % (ior.__class__.__name__, src[0], src[1], dst[0], dst[1]))
+					ior.intercept(client, dst)
+					break
+		finally:
+			client.close()
 
 	def add_interceptor(self, interceptor):
 		self.interceptors.append(interceptor)
