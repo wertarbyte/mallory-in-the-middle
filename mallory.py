@@ -21,8 +21,9 @@ from paramiko.py3compat import b, u, decodebytes
 
 class MalloryServer:
 
-	def __init__(self, port, use_socks):
+	def __init__(self, port, localaddr='', use_socks=False):
 		self.port = port
+		self.localaddr = localaddr
 		self.use_socks = use_socks
 		self.socket = None
 		self.interceptors = []
@@ -62,7 +63,7 @@ class MalloryServer:
 	def _bind_socket(self):
 		self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-		self.socket.bind(('', self.port))
+		self.socket.bind((self.localaddr, self.port))
 
 	def _loop(self):
 		self.socket.listen(0)
@@ -92,6 +93,9 @@ class MalloryServer:
 			self._loop()
 
 class MalloryInterceptor:
+	def __init__(self, localaddr=''):
+		self.localaddr = localaddr
+
 	def want(self, dst):
 		pass
 	def intercept(self, client, dst):
@@ -102,8 +106,7 @@ class TCPRelay(MalloryInterceptor):
 		return True
 
 	def intercept(self, client, dst):
-		target = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		target.connect(dst)
+		target = socket.create_connection(dst, source_address=(self.localaddr, 0))
 		
 		mapping = {}
 		mapping[client] = target
@@ -121,9 +124,7 @@ class TCPRelay(MalloryInterceptor):
 					mapping[s].send(data)
 
 class SSHRejectingServer(paramiko.ServerInterface):
-	identity = None
-
-	def __init__(self, identity):
+	def __init__(self, identity=''):
 		self.identity = identity
 		self.event = threading.Event()
 
@@ -158,7 +159,9 @@ class SSHHostKeyring:
 			return (None, True)
 
 class SSHTargetDatabase:
-	hosts = {}
+	def __init__(self, localaddr=''):
+		self.hosts = {}
+		self.localaddr = localaddr
 
 	def get_fp(self, dst):
 		if (dst) not in self.hosts:
@@ -171,8 +174,7 @@ class SSHTargetDatabase:
 		client = paramiko.SSHClient()
 		# now connect
 		try:
-			sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			sock.connect(dst)
+			sock = socket.create_connection(dst, source_address=(self.localaddr, 0))
 		except Exception as e:
 			print('*** Connect failed: ' + str(e))
 			traceback.print_exc()
@@ -191,7 +193,8 @@ class SSHTargetDatabase:
 			sock.close()
 
 class SSHInterceptor(MalloryInterceptor):
-	def __init__(self, keyring, targets, fake_keys=False):
+	def __init__(self, keyring, targets, localaddr='', fake_keys=False):
+		MalloryInterceptor.__init__(self, localaddr)
 		self.keyring = keyring
 		self.targets = targets
 		self.fake_keys = fake_keys
@@ -241,21 +244,25 @@ def launch_server():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--port", type=int, dest="port", help="listening port")
 	parser.add_argument("--socks", action="store_true", help="offer SOCKS4 (default: no)")
+	parser.add_argument("--outaddr", type=str, dest='outaddr', default='',
+	                    help="local ip address to use for outgoing connections")
+	parser.add_argument("--bindaddr", type=str, dest='bindaddr', default='',
+	                    help="local ip address to listen on")
 	parser.add_argument("--autokeygen", action="store_true", help="generate random keys (default: no)")
 	parser.add_argument('keys', metavar='KEYFILE', type=str, nargs='*',
                             help='SSH host key files')
 	args = parser.parse_args()
 
-	targetdb = SSHTargetDatabase()
+	targetdb = SSHTargetDatabase(args.outaddr)
 	keyring = SSHHostKeyring(args.autokeygen)
 	for filename in args.keys:
 		keyring.load_keyfile(filename)
 
 	print('%u distinct host keys have been loaded into the key ring' % len(keyring.keys))
 
-	mallory = MalloryServer(args.port, args.socks)
-	mallory.add_interceptor(SSHInterceptor(keyring, targetdb, args.autokeygen))
-	mallory.add_interceptor(TCPRelay())
+	mallory = MalloryServer(args.port, args.bindaddr, args.socks)
+	mallory.add_interceptor(SSHInterceptor(keyring, targetdb, args.outaddr, args.autokeygen))
+	mallory.add_interceptor(TCPRelay(args.outaddr))
 	mallory.start()
 
 def quit(signal, frame):
