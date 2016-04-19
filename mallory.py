@@ -242,7 +242,7 @@ def fmt_fp(fp):
 
 def launch_server():
 	parser = argparse.ArgumentParser()
-	parser.add_argument("--port", type=int, dest="port", help="listening port")
+	parser.add_argument("--port", type=int, dest="port", required=True, help="listening port")
 	parser.add_argument("--socks", action="store_true", help="offer SOCKS4 (default: no)")
 	parser.add_argument("--outaddr", type=str, dest='outaddr', default='',
 	                    help="local ip address to use for outgoing connections")
