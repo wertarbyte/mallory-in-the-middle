@@ -204,17 +204,20 @@ class SSHTargetDatabase:
 			sock.close()
 
 class SSHInterceptor(MalloryInterceptor):
-	def __init__(self, keyring, targets, localaddr='', fake_keys=False):
+	def __init__(self, keyring, targets, localaddr='', fake_keys=False, blindcatch=False):
 		MalloryInterceptor.__init__(self, localaddr)
 		self.keyring = keyring
 		self.targets = targets
 		self.fake_keys = fake_keys
+		self.blindcatch = blindcatch
 
 	def want(self, dst):
 		if (dst[1] != 22):
 			return False
-		# get host key of target
-		fp = self.targets.get_fp(dst)
+		fp = None
+		if not self.blindcatch:
+			# get host key of target
+			fp = self.targets.get_fp(dst)
 		if not fp:
 			if self.fake_keys:
 				key = self.keyring.gen_key()
@@ -268,6 +271,7 @@ def launch_server():
 	parser.add_argument("--bindaddr", type=str, dest='bindaddr', default='',
 	                    help="local ip address to listen on")
 	parser.add_argument("--autokeygen", action="store_true", help="generate random keys (default: no)")
+	parser.add_argument("--blindcatch", action="store_true", help="catch all SSH connection (default: no)")
 	parser.add_argument('keys', metavar='KEYFILE', type=str, nargs='*',
                             help='SSH host key files')
 	args = parser.parse_args()
@@ -280,7 +284,10 @@ def launch_server():
 	print('%u distinct host keys have been loaded into the key ring' % len(keyring.keys))
 
 	mallory = MalloryServer(args.port, args.bindaddr, args.socks)
-	mallory.add_interceptor(SSHInterceptor(keyring, targetdb, args.outaddr, args.autokeygen))
+	mallory.add_interceptor(SSHInterceptor(keyring, targetdb,
+	                                       args.outaddr,
+	                                       args.autokeygen,
+	                                       args.blindcatch))
 	mallory.add_interceptor(TCPRelay(args.outaddr))
 	mallory.start()
 
