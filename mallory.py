@@ -144,7 +144,7 @@ class SSHHostKeyring:
 	def load_keyfile(self, filename):
 		key = paramiko.RSAKey(filename=filename)
 		fp = key.get_fingerprint()
-		print('Read key ' + fmt_fp(u(hexlify(fp))) + ' from "' + filename +'"')
+		print('Read key ' + fmt_fp(fp) + ' from "' + filename +'"')
 		self.keys[fp] = (key, True)
 
 	def gen_key(self):
@@ -157,9 +157,11 @@ class SSHHostKeyring:
 		if fp in self.keys:
 			return self.keys[fp]
 		elif self.fake_keys:
-			print('Generating new fake key for fingerprint ' + fmt_fp(u(hexlify(fp))))
 			key = self.gen_key()
 			self.keys[fp] = (key, False)
+			real_fp = key.get_fingerprint()
+			print('Generating new fake key for fingerprint ' +
+			      fmt_fp(fp) + ' (actually ' + fmt_fp(real_fp) + ')')
 			return self.keys[fp]
 		else:
 			return (None, True)
@@ -194,7 +196,7 @@ class SSHTargetDatabase:
 		try:
 			t.start_client()
 			key = t.get_remote_server_key()
-			print('retrieved target fp: ' + fmt_fp(u(hexlify(key.get_fingerprint()))))
+			print('retrieved target fp: ' + fmt_fp(key.get_fingerprint()))
 			return key.get_fingerprint()
 		except paramiko.SSHException:
 			print('*** SSH negotiation failed.')
@@ -222,12 +224,16 @@ class SSHInterceptor(MalloryInterceptor):
 			if self.fake_keys:
 				key = self.keyring.gen_key()
 				fp = key.get_fingerprint()
-				print('Generated key for unreachable host: ' + fmt_fp(u(hexlify(fp))))
+				print('Generated key for unknown host: ' + fmt_fp(fp))
 				self.targets.set_fp(dst, fp)
 			else:
 				return False
 		key, genuine = self.keyring.get_key(fp)
-		print('Got key: %r (%r)' % (key, genuine))
+		if key:
+			print('Got key: %s (%r)' % (fmt_fp(key.get_fingerprint()), genuine))
+		else:
+			print('No suitable keys found')
+
 		if key and (genuine or self.fake_keys):
 			return True
 		return False
@@ -257,6 +263,7 @@ class SSHInterceptor(MalloryInterceptor):
 				print('*** Timeout waiting for channel request.')
 
 def fmt_fp(fp):
+	fp = u(hexlify(fp))
 	n = 2
 	tokens = [ fp[i:i+n] for i in xrange(0, len(fp), n) ]
 	return ':'.join(tokens)
