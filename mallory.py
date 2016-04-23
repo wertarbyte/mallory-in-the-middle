@@ -147,12 +147,18 @@ class SSHHostKeyring:
 		print('Read key ' + fmt_fp(u(hexlify(fp))) + ' from "' + filename +'"')
 		self.keys[fp] = (key, True)
 
+	def gen_key(self):
+		key = paramiko.rsakey.RSAKey.generate(1024)
+		fp = key.get_fingerprint()
+		self.keys[fp] = (key, True)
+		return key
+
 	def get_key(self, fp):
 		if fp in self.keys:
 			return self.keys[fp]
 		elif self.fake_keys:
 			print('Generating new fake key for fingerprint ' + fmt_fp(u(hexlify(fp))))
-			key = paramiko.rsakey.RSAKey.generate(1024)
+			key = self.gen_key()
 			self.keys[fp] = (key, False)
 			return self.keys[fp]
 		else:
@@ -170,11 +176,16 @@ class SSHTargetDatabase:
 
 		return self.hosts[dst]
 
+	def set_fp(self, dst, fp):
+		self.hosts[dst] = fp
+
 	def __get_server_fp(self, dst):
 		client = paramiko.SSHClient()
 		# now connect
 		try:
-			sock = socket.create_connection(dst, source_address=(self.localaddr, 0))
+			sock = socket.create_connection(dst,
+			                                timeout = 5,
+			                                source_address = (self.localaddr, 0))
 		except Exception as e:
 			print('*** Connect failed: ' + str(e))
 			traceback.print_exc()
@@ -204,6 +215,14 @@ class SSHInterceptor(MalloryInterceptor):
 			return False
 		# get host key of target
 		fp = self.targets.get_fp(dst)
+		if not fp:
+			if self.fake_keys:
+				key = self.keyring.gen_key()
+				fp = key.get_fingerprint()
+				print('Generated key for unreachable host: ' + fmt_fp(u(hexlify(fp))))
+				self.targets.set_fp(dst, fp)
+			else:
+				return False
 		key, genuine = self.keyring.get_key(fp)
 		print('Got key: %r (%r)' % (key, genuine))
 		if key and (genuine or self.fake_keys):
