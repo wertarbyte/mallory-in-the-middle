@@ -285,8 +285,16 @@ def launch_server():
 
 	targetdb = SSHTargetDatabase(args.outaddr)
 	keyring = SSHHostKeyring(args.autokeygen)
-	for filename in args.keys:
-		keyring.load_keyfile(filename)
+	for farg in args.keys:
+		if os.path.isdir(farg):
+			for root, dirs, files in os.walk(farg):
+				for file in files:
+					fpath = os.path.join(root, file)
+					keyring.load_keyfile(fpath)
+		elif os.path.isfile(farg):
+			keyring.load_keyfile(farg)
+		else:
+			print("Argument '%s' is neither directory nor file.")
 
 	print('%u distinct host keys have been loaded into the key ring' % len(keyring.keys))
 
