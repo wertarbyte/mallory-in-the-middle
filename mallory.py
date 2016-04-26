@@ -285,18 +285,32 @@ def launch_server():
 
 	targetdb = SSHTargetDatabase(args.outaddr)
 	keyring = SSHHostKeyring(args.autokeygen)
+	failed_keys = []
 	for farg in args.keys:
 		if os.path.isdir(farg):
 			for root, dirs, files in os.walk(farg):
-				for file in files:
+				for file in sorted(files):
 					fpath = os.path.join(root, file)
-					keyring.load_keyfile(fpath)
+					try:
+						keyring.load_keyfile(fpath)
+					except:
+						failed_keys.append(fpath)
+						print("'%s' does not seem to be a valid keyfile, skipping..." % fpath)
 		elif os.path.isfile(farg):
-			keyring.load_keyfile(farg)
+			try:
+				keyring.load_keyfile(farg)
+			except:
+				failed_keys.append(farg)
+				print("'%s' does not seem to be a valid keyfile, skipping..." % fpath)
 		else:
-			print("Argument '%s' is neither directory nor file.")
+			failed_keys.append(farg)
+			print("Argument '%s' is neither directory nor file." % farg)
 
 	print('%u distinct host keys have been loaded into the key ring' % len(keyring.keys))
+	if failed_keys:
+		print("The following files could not be loaded:")
+		for file in failed_keys:
+			print(file)
 
 	mallory = MalloryServer(args.port, args.bindaddr, args.socks)
 	mallory.add_interceptor(SSHInterceptor(keyring, targetdb,
