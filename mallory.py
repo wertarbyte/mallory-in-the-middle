@@ -80,6 +80,10 @@ class MalloryServer:
 	def _handle_client(self, client, src):
 		try:
 			dst = self._get_dst(client)
+			if client.getsockname() == dst:
+				print('Breaking connection loop back to us: %s:%d -> %s:%d' % (src, dst))
+				return
+
 			if self.acl and self.acl['dport'] and \
 			   (dst[1] not in self.acl['dport'] or not self.acl['dport'][dst[1]]):
 				print("Rejecting connection to '%s:%d' due to dport ACL" % dst)
