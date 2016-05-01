@@ -21,12 +21,13 @@ from paramiko.py3compat import b, u, decodebytes
 
 class MalloryServer:
 
-	def __init__(self, port, localaddr='', use_socks=False):
+	def __init__(self, port, localaddr='', use_socks=False, acl=None):
 		self.port = port
 		self.localaddr = localaddr
 		self.use_socks = use_socks
 		self.socket = None
 		self.interceptors = []
+		self.acl = acl
 
 	def _get_dst(self, conn):
 		if self.use_socks:
@@ -67,14 +68,23 @@ class MalloryServer:
 
 	def _loop(self):
 		self.socket.listen(0)
-		client, addr = self.socket.accept()
-		client_thread = threading.Thread(target=self._handle_client, args=(client, addr))
+		client, src = self.socket.accept()
+		if self.acl and self.acl['src'] and \
+		   (src[0] not in self.acl['src'] or not self.acl['src'][src[0]]):
+			print("Rejecting connection from '%s:%d' due to client ACL" % src)
+			return
+		client_thread = threading.Thread(target=self._handle_client, args=(client, src))
 		client_thread.setDaemon(True)
 		client_thread.start()
 
 	def _handle_client(self, client, src):
 		try:
 			dst = self._get_dst(client)
+			if self.acl and self.acl['dport'] and \
+			   (dst[1] not in self.acl['dport'] or not self.acl['dport'][dst[1]]):
+				print("Rejecting connection to '%s:%d' due to dport ACL" % dst)
+				return
+
 			for ior in self.interceptors:
 				if ior.want(dst):
 					print('[%s] Intercepting connection: %s:%d -> %s:%d' % (ior.__class__.__name__, src[0], src[1], dst[0], dst[1]))
@@ -279,6 +289,8 @@ def launch_server():
 	                    help="local ip address to listen on")
 	parser.add_argument("--autokeygen", action="store_true", help="generate random keys (default: no)")
 	parser.add_argument("--blindcatch", action="store_true", help="catch all SSH connection (default: no)")
+	parser.add_argument("--client", action="append", help="only accept connections from specified client address")
+	parser.add_argument("--dport", action="append", help="only accept connections to specified ports")
 	parser.add_argument('keys', metavar='KEYFILE', type=str, nargs='*',
                             help='SSH host key files')
 	args = parser.parse_args()
@@ -312,7 +324,12 @@ def launch_server():
 		for file in failed_keys:
 			print(file)
 
-	mallory = MalloryServer(args.port, args.bindaddr, args.socks)
+	acl = {'src': None, 'dport': None}
+	if args.client:
+		acl['src'] = {x:True for x in args.client}
+	if args.dport:
+		acl['dport'] = {int(x):True for x in args.dport}
+	mallory = MalloryServer(args.port, args.bindaddr, args.socks, acl)
 	mallory.add_interceptor(SSHInterceptor(keyring, targetdb,
 	                                       args.outaddr,
 	                                       args.autokeygen,
