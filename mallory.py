@@ -270,6 +270,9 @@ class SSHInterceptor(MalloryInterceptor):
 			server = SSHRejectingServer("%s:%d" % (dst[0], dst[1]))
 			try:
 				t.start_server(server=server)
+			except EOFError:
+				print_msg('Connection closed')
+				return
 			except paramiko.SSHException:
 				print_msg('*** SSH negotiation failed.')
 				return
