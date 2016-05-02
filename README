@@ -1,0 +1,59 @@
+Mallory in the Middle
+
+ Yes, no, maybe. I don't know. Can you repeat the question?
+
+by Stefan Tomanek <stefan.tomanek@wertarbyte.de>
+
+
+"Mallory in the Middle" is a man-in-the-middle tool designed to intercept SSH
+connections by utilizing leaked host keys. SSH host keys are supposed to be
+unique and secret, but some became public knowledge, either due to
+configuration mismanagement, lack of entropy during generation or just
+warehouses of embedded devices being shipped with identical keys. An arbitrary
+number of these keys can be loaded into Mallory.
+
+Once ready, Mallory waits for incoming connections on a listing port;
+connections can be redirected either by using iptables on the local machine
+with the REDIRECT target or by guiding them through a SOCKS connection. That
+way, connections can be redirected from a different machine/router to the
+system running mallory (e.g. by using redsocks).
+
+Once an SSH connection is intercepted, Mallory contacts the initial target and
+retrieves the host key fingerprint. It then checks its own key database for a
+matching key: if it is found, it starts the SSH negotiation with the client and
+prints the supplied credentials (username/password) before indicating an
+authentication error to the client. If no matching key is found, Mallory cannot
+pose as the intended server and acts as a transparent TCP proxy to allow the
+connection to succeed unhindered.
+
+
+Examples:
+
+These two commands redirect every SSH connection traversing the system through
+the mitm-proxy with all the keys recursively loaded from the directory 'keys/':
+
+ iptables -t nat -A PREROUTING -p tcp --dport 22 -j REDIRECT --to-destination 12345
+
+ ./mallory.py --port 12345 keys/
+
+If you want to use SOCKS to direct connections to the proxy and make Mallory
+use a specific IP address for outgoing connections:
+
+ ./mallory.py --port 12345 --socks --outaddr 192.168.0.23 keys/
+
+You can also advice mallory to auto-generate keys for unknown hosts and/or intercept
+all SSH connections without looking at the real server at all:
+
+ ./mallory.py --port 12345 --autokeygen --blindcatch
+
+Only allow incoming connections from a set of hosts:
+
+ ./mallory.py --port 12345 --socks --client 192.168.0.4 --client 192.168.0.5 keys/
+
+Only forward connections to a set of destination ports:
+
+ ./mallory.py --port 12345 --socks --dport 22 --dport 80 keys/
+
+
+This tool was written for demonstration purposes only: do not use it otherwise.
+Always check the fingerprint before connecting to your server. SSH responsibly.
